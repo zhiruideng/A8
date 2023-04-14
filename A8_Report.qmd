@@ -1,0 +1,121 @@
+---
+title: "A8 - Hennepin County Tidycensus Map"
+author: "Zhirui Deng"
+format: 
+  html:
+    embed-resources: true
+editor: visual
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(tidyverse)
+library(leaflet)
+library(osmdata)
+library(viridis)
+library(sf)
+library(ggmap)
+library(tidycensus)
+library(plotly)
+library(lubridate)
+library(gt)
+library(paletteer)
+library(ggthemes)
+library(htmltools)
+library(scales)
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+
+## Load the API key
+api_key <- Sys.getenv("MAPS_API_KEY")
+
+# Basemap
+hen.county <- getbb("hennepin")
+hen.basemap <- get_map(location = hen.county, source = "stamen", maptype = "terrain", crop = TRUE)
+hen.outline <- getbb("hennepin", format_out = "polygon")[[1]] %>%
+  as_tibble() %>%
+  rename(longitude = V1, latitude = V2)
+
+# obtain data frame
+options(tigris_use_cache = TRUE)
+vars <- load_variables(year = 2020, dataset = "acs5", cache = TRUE)
+hennepin.df <- get_acs(state = "MN",
+                       variables = "B17010_001", # Poverty status of families
+                       county = "Hennepin",
+                       geography = "tract",
+                       year = 2020,
+                       geometry = TRUE,
+                       cache_table = TRUE)
+
+hennepin.df.wide <- pivot_wider(hennepin.df, 
+                                names_from = "variable", 
+                                values_from = c("estimate", "moe"))
+# hennepin.df.wide %>% as_tibble() %>% dplyr::select(-geometry) %>% head() %>% gt()
+hennepin.df.plotly <- hennepin.df.wide %>%
+  mutate(tract = str_split(NAME, ",") %>%
+           map_chr(1) %>%
+           str_remove("Census Tract "),
+         text_label = str_c(
+           
+            NAME,
+           "\nPoverty Status of Families: ",
+            round(estimate_B17010_001, 3)))
+
+# ggplotly - base
+hen.base.gg <-  
+  ggmap(hen.basemap) +
+  geom_polygon(data = hen.outline, 
+               aes(x = longitude, y = latitude), 
+               color = "black", size = 2, alpha = 0.1) +
+  theme_map()+
+  theme(plot.title = element_text(size = 16, hjust = 0.5),
+        legend.text = element_text(size = 16),
+        legend.title = element_text(size = 16),
+        legend.position = "right")
+
+# ggplotly
+hen.gg <- 
+  hen.base.gg + 
+  geom_sf(data = hennepin.df.plotly, 
+          aes(fill = round(estimate_B17010_001, 3), text = text_label), 
+          colour = "black", size = 0.1,
+          inherit.aes = FALSE) +
+  
+  # geom_path(data = hen.outline,aes(x = longitude, y = latitude),colour = "black", size = 1.2, alpha = 0.6, inherit.aes = FALSE) + 
+  
+  labs(title = "Poverty Status in Hennepin MN",
+       x = "Latitude",
+       y = "Longitude") +
+  scale_fill_viridis_c("Poverty Status of Families", labels = scales::number) +
+  theme_map() +
+  theme(plot.title = element_text(size = 16, hjust = 0.5),
+        legend.text = element_text(size = 16),
+        legend.title = element_text(size = 16),
+        legend.position = "right")
+
+```
+
+## Map Information
+
+**Details:** Estimated Poverty Status of Families by Census Block
+
+**Location:** Hennepin, MN
+
+**Source:** 2020 ACS
+
+## Map
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+
+ggplotly(hen.gg, 
+         tooltip = "text") %>%
+    style(hoveron = "fills") 
+
+```
